@@ -7,6 +7,9 @@
 *.userosscache
 *.sln.docstates
 
+# FYI, you maybe don't want to ignore this file.
+launchSettings.json
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 

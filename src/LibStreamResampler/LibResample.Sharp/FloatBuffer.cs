@@ -14,6 +14,8 @@ namespace LibResample.Sharp
 {
     internal class FloatBuffer
     {
+        public float[] Data { get { return _buffer; } }
+
         private readonly float[] _buffer;
         private int _position;
         private readonly int _start;
