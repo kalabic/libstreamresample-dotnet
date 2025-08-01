@@ -1,4 +1,2 @@
-# libresamplesharp
-1. License information will be added 
-2. More detail will be added
-3. Unit test will be updated
+# libstreamresample-dotnet
+Experiment with audio resampling using fork of [xycui/libresamplesharp](https://github.com/xycui/libresamplesharp).
