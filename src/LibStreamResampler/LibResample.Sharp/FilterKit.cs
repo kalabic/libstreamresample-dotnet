@@ -1,7 +1,12 @@
-﻿/****************************************************
- * How to write license ? any one could provide help?
- * 
- ***************************************************/
+﻿/*
+
+MIT License, see: https://github.com/kalabic/libstreamresample-dotnet/blob/master/LICENSE
+
+History:
+- Original: https://github.com/xycui/libresamplesharp/blob/master/LibResample.Sharp/FilterKit.cs
+- Forked: https://github.com/kalabic/libstreamresample-dotnet/blob/master/src/LibStreamResampler/LibResample.Sharp/FilterKit.cs
+
+*/
 
 using System;
 

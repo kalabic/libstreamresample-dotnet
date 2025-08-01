@@ -1,7 +1,13 @@
-﻿/**************************************************************
- * License detail will be added later
- * 
- **************************************************************/
+﻿/*
+
+MIT License, see: https://github.com/kalabic/libstreamresample-dotnet/blob/master/LICENSE
+
+History:
+- Original: https://github.com/xycui/libresamplesharp/blob/master/LibResample.Sharp/ISampleBuffers.cs
+- Forked: https://github.com/kalabic/libstreamresample-dotnet/blob/master/src/LibStreamResampler/LibResample.Sharp/ISampleBuffers.cs
+
+*/
+
 namespace LibResample.Sharp
 {
     /// <summary>
