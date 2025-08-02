@@ -12,6 +12,11 @@ public class StreamResampler
         return new StreamResampler(highQuality, numChannels, inputSampleRate, outputSampleRate);
     }
 
+    public static int GetExpectedOutputSize(int inputSize, float factor)
+    {
+        return (int)(inputSize * factor) + 400;
+    }
+
     public static unsafe short[] ShortArrayFromBytes(byte* src, int srcSize)
     {
         int srcSamples = srcSize / SHORT_SIZE;
@@ -54,11 +59,6 @@ public class StreamResampler
             _resampler = new(highQuality, factor, factor);
         }
 
-        private int GetExpectedOutputSize(int inputSize, float factor)
-        {
-            return (int)(inputSize * factor) + 100;
-        }
-
         public float[] PrepareInput(int samplesCount)
         {
             if (_input.Length < samplesCount)
@@ -91,11 +91,13 @@ public class StreamResampler
         }
     }
 
-    public int InPacketCount { get { return _inPacketCount; } }
+    public float Factor { get { return _factor; } }
 
-    public int InBytesProcessed { get { return _inBytesProcessed; } }
+    public long InPacketCount { get { return _inPacketCount; } }
 
-    public int OutBytesGenerated { get { return _outBytesGenerated; } }
+    public long InBytesProcessed { get { return _inBytesProcessed; } }
+
+    public long OutBytesGenerated { get { return _outBytesGenerated; } }
 
     private int _numChannels;
 
@@ -105,13 +107,13 @@ public class StreamResampler
 
     private byte[]? _outBuffer = null;
 
-    private int _outSamplesReady = 0;
+    private long _outSamplesReady = 0;
 
-    private int _inPacketCount = 0;
+    private long _inPacketCount = 0;
 
-    private int _inBytesProcessed = 0;
+    private long _inBytesProcessed = 0;
 
-    private int _outBytesGenerated = 0;
+    private long _outBytesGenerated = 0;
 
     private StreamResampler(bool highQuality, int numChannels, int inputSampleRate, int outputSampleRate)
         : this(highQuality, numChannels, (float)outputSampleRate / (float)inputSampleRate)
@@ -212,14 +214,14 @@ public class StreamResampler
         }
     }
 
-    public int GetOutputSizeInBytes()
+    public long GetOutputSizeInBytes()
     {
         return _outSamplesReady * SHORT_SIZE * _numChannels;
     }
 
-    public unsafe int ConvertAndFillOutput(ref byte[]? outputBuffer)
+    public unsafe long ConvertAndFillOutput(ref byte[]? outputBuffer)
     {
-        int outputBytes = GetOutputSizeInBytes();
+        long outputBytes = GetOutputSizeInBytes();
         if (outputBuffer is null || outputBuffer.Length < outputBytes)
         {
             outputBuffer = new byte[outputBytes];
@@ -231,7 +233,7 @@ public class StreamResampler
         }
     }
 
-    public unsafe int ConvertAndFillOutput(byte* outputBuffer)
+    public unsafe long ConvertAndFillOutput(byte* outputBuffer)
     {
         short* shortPtr = (short*)outputBuffer;
         if (_numChannels == 1)
@@ -253,14 +255,14 @@ public class StreamResampler
             }
         }
 
-        int result = _outSamplesReady * SHORT_SIZE * _numChannels;
+        long result = _outSamplesReady * SHORT_SIZE * _numChannels;
         _outBytesGenerated += result;
         return result;
     }
 
     public void WriteToStream(Stream stream)
     {
-        int bytesRead = ConvertAndFillOutput(ref _outBuffer);
+        int bytesRead = (int)ConvertAndFillOutput(ref _outBuffer);
         if (_outBuffer != null)
         {
             stream.Write(_outBuffer, 0, bytesRead);
