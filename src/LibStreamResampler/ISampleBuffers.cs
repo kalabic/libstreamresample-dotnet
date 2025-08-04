@@ -14,7 +14,7 @@ namespace LibStreamResampler
     /// Callback for producing and consuming samples. Enalbes on-the-fly conversion between sample types
     /// (signed 16-bit integers to floats, for example) and/or writing directly to an output stream.
     /// </summary>
-    public interface ISampleBuffers
+    internal interface ISampleBuffers
     {
         /// <summary>
         /// Get the number of input samples available

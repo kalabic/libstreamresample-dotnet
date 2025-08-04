@@ -64,7 +64,7 @@ internal class Program
             new MAudioStreamFormat(AVSampleFormat.AV_SAMPLE_FMT_S16, outputSampleRate, inputFormat.BitsPerSample, inputFormat.NumChannels);
 
         var resampler = StreamResampler.Create(
-            true, inputFormat.NumChannels, inputFormat.SampleRate, outputFormat.SampleRate);
+            false, inputFormat.NumChannels, inputFormat.SampleRate, outputFormat.SampleRate);
 
         Console.WriteLine($"Sample ratio factor: {resampler.Factor}");
 
@@ -72,9 +72,8 @@ internal class Program
         var outputData = new List<MByteBuffer>(packetList.Count);
         foreach (var packet in packetList)
         {
-            outputData.Add(MFFApi.AllocPacketBuffer((ulong)
-                StreamResampler.GetExpectedOutputSize((int)packet.Size, resampler.Factor))
-            );
+            int outputSize = StreamResampler.GetExpectedOutputSize(packet.Size, resampler.Factor);
+            outputData.Add( MFFApi.AllocPacketBuffer((ulong)outputSize) );
         }
 
         Console.WriteLine($"Input:");
@@ -109,14 +108,22 @@ internal class Program
             var buffer = outputData[i];
             unsafe
             {
-                resampler.Process(packet.Data, packet.Size, packet.LastPacket);
-                buffer.BytesUsed = (ulong)resampler.ConvertAndFillOutput(buffer.Data);
+                // Number and size of output buffers was prepared during pre-allocation.
+                buffer.BytesUsed = (ulong)resampler.Process(packet.Data, packet.Size, packet.LastPacket, buffer.Data, (long)buffer.BytesAllocated);
+                // buffer.BytesUsed = (ulong)resampler.ConvertAndFillOutput(buffer.Data);
+            }
+
+            if (i % 500 == 0)
+            {
+                Console.Write($"\r{i} / {packetList.Count}");
             }
         }
         stopwatch.Stop();
         var elapsed = stopwatch.ElapsedMilliseconds;
-        Console.WriteLine($"Miliseconds elapsed: {elapsed}");
 
+        Console.WriteLine();
+        Console.WriteLine();
+        Console.WriteLine($"Miliseconds elapsed: {elapsed}");
         Console.WriteLine("Saving to file...");
 
         long dataBytesWritten = 0;
@@ -126,6 +133,17 @@ internal class Program
             outputStream.WritePacketFromData(buffer).ThrowIfError();
         }
         Console.WriteLine($"Bytes written: {dataBytesWritten}");
+
+
+        //
+        // Only clean up from here.
+        //
+
+        foreach (var packet in packetList)
+        {
+            packet.Dispose();
+        }
+        packetList.Clear();
 
         writer.Dispose();
         reader.Dispose();

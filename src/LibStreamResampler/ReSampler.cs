@@ -13,7 +13,7 @@ using System.Linq;
 
 namespace LibStreamResampler
 {
-    public class ReSampler
+    internal class ReSampler
     {
         /// <summary>
         ///     Number of values per 1/delta in impulse response
@@ -40,7 +40,7 @@ namespace LibStreamResampler
         ///     Clone an existing resampling session. Faster than creating one from scratch.
         /// </summary>
         /// <param name="other">another instance of resampler</param>
-        public ReSampler(ReSampler other)
+        internal ReSampler(ReSampler other)
         {
             _imp = other._imp.ToArray();
             _impD = other._impD.ToArray();
@@ -59,7 +59,7 @@ namespace LibStreamResampler
             _time = other._time;
         }
 
-        public ReSampler(bool highQuality, double minFactor, double maxFactor)
+        internal ReSampler(bool highQuality, double minFactor, double maxFactor)
         {
             if (minFactor <= 0.0 || maxFactor <= 0.0)
             {
@@ -250,21 +250,6 @@ namespace LibStreamResampler
             return inBufferUsed == 0 && outSampleCount == 0;
         }
 
-        internal bool Process(double factor, FloatBuffer inputbuffer, bool lastBatch, FloatBuffer outputBuffer)
-        {
-            return Process(factor, new SampleBuffers(inputbuffer, outputBuffer), lastBatch);
-        }
-
-        public Result Process(double factor, float[] inBuffer, int inBufferOffset, int inBufferLen, bool lastBatch,
-            float[] outBuffer, int outBufferOffset, int outBufferLen)
-        {
-            var inputBuffer = FloatBuffer.Wrap(inBuffer, inBufferOffset, inBufferLen);
-            var outputBuffer = FloatBuffer.Wrap(outBuffer, outBufferOffset, outBufferLen);
-            Process(factor, inputBuffer, lastBatch, outputBuffer);
-
-            return new Result(inputBuffer.Position, outputBuffer.Position);
-        }
-
         private int LrsSrcUp(float[] x, float[] y, double factor, int nx, int nwing, float lpScl, float[] imp, float[] impD, bool interp)
         {
             float[] xpArray = x;
@@ -349,37 +334,6 @@ namespace LibStreamResampler
 
             public int InputSamplesConsumed { get; private set; }
             public int OutputSamplesgenerated { get; private set; }
-        }
-
-        internal class SampleBuffers : ISampleBuffers
-        {
-            private readonly FloatBuffer _inBuffer;
-            private readonly FloatBuffer _outBuffer;
-            public SampleBuffers(FloatBuffer inBuffer, FloatBuffer outBuffer)
-            {
-                _inBuffer = inBuffer;
-                _outBuffer = outBuffer;
-            }
-
-            public int GetInputBufferLenght()
-            {
-                return _inBuffer.RemainLength;
-            }
-
-            public int GetOutputBufferLength()
-            {
-                return _outBuffer.RemainLength;
-            }
-
-            public void ProduceInput(float[] array, int offset, int length)
-            {
-                _inBuffer.Get(array, offset, length);
-            }
-
-            public void ConsumeOutput(float[] array, int offset, int length)
-            {
-                _outBuffer.Put(array, offset, length);
-            }
         }
     }
 }

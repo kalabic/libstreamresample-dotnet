@@ -40,52 +40,83 @@ public class StreamResampler
     /// </summary>
     private const float CONVERT_FACTOR_SHORT = 32768.0f;
 
-    private class ChannelResampler
+    private unsafe class ChannelResampler : ISampleBuffers
     {
-        public FloatBuffer Output { get { return _output; } }
-
         private ReSampler _resampler;
 
-        private float[] _input = new float[1];
+        private int _ioff;
 
-        private int _inputBufferUsed = 0;
+        private int _istep;
 
-        private FloatBuffer _output = FloatBuffer.Wrap(new float[1], 0, 1);
+        private short* _input = null;
 
-        public ChannelResampler(bool highQuality, float factor)
+        private short* _output = null;
+
+        private long _inputSampleCount = 0;
+
+        private long _inputSamplesUsed = 0;
+
+        private long _outputSampleMaxCount = 0;
+
+        private long _outputSampleCount = 0;
+
+        public ChannelResampler(bool highQuality, float factor, int ioff, int istep)
         {
             _resampler = new(highQuality, factor, factor);
+            _ioff = ioff;
+            _istep = istep;
         }
 
-        public float[] PrepareInput(int samplesCount)
+        public unsafe long ProcessInput(float factor, bool lastPacket, byte* input, long inputSize, byte* output, long outputSize)
         {
-            if (_input.Length < samplesCount)
-            {
-                _input = new float[samplesCount];
-            }
-            _inputBufferUsed = samplesCount;
-            return _input;
-        }
+            _input = (short *)input;
+            _output = (short*)output;
+            _inputSamplesUsed = 0;
+            _inputSampleCount = inputSize / 2;
+            _outputSampleCount = 0;
+            _outputSampleMaxCount = outputSize / 2;
 
-        public int ProcessInput(bool lastPacket, float factor)
-        {
-            _output.Position = 0;
-
-            int expectedSize = GetExpectedOutputSize(_inputBufferUsed, factor);
-            if (_output.Length < expectedSize)
-            {
-                _output = FloatBuffer.Wrap(new float[expectedSize], 0, expectedSize);
-            }
-
-            var inputBuffer = FloatBuffer.Wrap(_input, 0, _inputBufferUsed);
-            var buffers = new ReSampler.SampleBuffers(inputBuffer, _output);
-            _resampler.Process(factor, buffers, lastPacket);
-            if (inputBuffer.RemainLength > 0)
+            _resampler.Process(factor, this, lastPacket);
+            if (_inputSamplesUsed < _inputSampleCount)
             {
                 throw new InvalidOperationException("Previous operation did not process all of input.");
             }
 
-            return _output.Position;
+            return _outputSampleCount * 2;
+        }
+
+        //
+        // ISampleBuffers interface members.
+        //
+
+        public int GetInputBufferLenght()
+        {
+            return (int)(_inputSampleCount - _inputSamplesUsed);
+        }
+
+        public int GetOutputBufferLength()
+        {
+            return (int)(_outputSampleMaxCount - _outputSampleCount);
+        }
+
+        public void ProduceInput(float[] array, int offset, int length)
+        {
+            for (int i = 0; i < length; i++)
+            {
+                int index = (int)(_ioff + ((_inputSamplesUsed + i) * _istep));
+                array[offset + i] = _input[index] / CONVERT_FACTOR_SHORT;
+            }
+            _inputSamplesUsed += length;
+        }
+
+        public void ConsumeOutput(float[] array, int offset, int length)
+        {
+            for (int i = 0; i < length; i++)
+            {
+                int index = (int)(_ioff + ((_outputSampleCount + i) * _istep));
+                _output[index] = (short)(array[offset + i] * CONVERT_FACTOR_SHORT);
+            }
+            _outputSampleCount += length;
         }
     }
 
@@ -102,8 +133,6 @@ public class StreamResampler
     private float _factor;
 
     private ChannelResampler[] _cresArr;
-
-    private byte[]? _outBuffer = null;
 
     private long _outSamplesReady = 0;
 
@@ -129,148 +158,34 @@ public class StreamResampler
         _cresArr = new ChannelResampler[numChannels];
         if (numChannels == 1)
         {
-            _cresArr[0] = new ChannelResampler(highQuality, factor);
+            _cresArr[0] = new ChannelResampler(highQuality, factor, 0, 1);
         }
         else if (numChannels == 2)
         {
-            _cresArr[0] = new ChannelResampler(highQuality, factor);
-            _cresArr[1] = new ChannelResampler(highQuality, factor);
+            _cresArr[0] = new ChannelResampler(highQuality, factor, 0, 2);
+            _cresArr[1] = new ChannelResampler(highQuality, factor, 1, 2);
         }
     }
 
-    public unsafe void Process(byte* input, int inputSize, bool lastPacket, Stream output)
+    public unsafe long Process(byte* input, long inputSize, bool lastPacket, byte* output, long outputSize)
     {
-        Process(input, inputSize, lastPacket);
-        WriteToStream(output);
-    }
+        long outputUsed = 0;
+        for (int i=0; i < _numChannels; i++)
+        {
+            // TODO(?): Assert that all channels returned the same value.
+            // TODO(?): Process in parallel (async).
+            outputUsed += _cresArr[i].ProcessInput(_factor, lastPacket, input, inputSize / _numChannels, output, outputSize / _numChannels);
+        }
 
-    public void Process(short[] input, bool lastPacket, Stream output)
-    {
-        Process(input, lastPacket);
-        WriteToStream(output);
-    }
-
-    public unsafe void Process(byte* input, int inputSize, bool lastPacket)
-    {
-        ConvertAndPrepareInput(input, inputSize);
-        ProcessInput(lastPacket);
         _inPacketCount++;
         _inBytesProcessed += inputSize;
+        return outputUsed;
     }
 
-    public void Process(short[] input, bool lastPacket)
-    {
-        ConvertAndPrepareInput(input);
-        ProcessInput(lastPacket);
-        _inPacketCount++;
-        _inBytesProcessed += input.Length * sizeof(short);
-    }
-
-    private void ProcessInput(bool lastPacket)
-    {
-        if (_numChannels == 1)
-        {
-            _outSamplesReady = _cresArr[0].ProcessInput(lastPacket, _factor);
-        }
-        else if (_numChannels == 2)
-        {
-            int outputSamples0 = _cresArr[0].ProcessInput(lastPacket, _factor);
-            int outputSamples1 = _cresArr[1].ProcessInput(lastPacket, _factor);
-            _outSamplesReady = Math.Min(outputSamples0, outputSamples1);
-        }
-    }
-
-    private unsafe void ConvertAndPrepareInput(short[] input)
-    {
-        fixed (short* shortPtr = input)
-        {
-            ConvertAndPrepareInput((byte*)shortPtr, input.Length * SHORT_SIZE);
-        }
-    }
-
-    private unsafe void ConvertAndPrepareInput(byte* input, int inputSize)
-    {
-        int srcSamples = inputSize / (SHORT_SIZE * _numChannels);
-        short* shortArr = (short*)input;
-        if (_numChannels == 1)
-        {
-            var input0 = _cresArr[0].PrepareInput(srcSamples);
-            for (int i = 0; i < srcSamples; i++)
-            {
-                input0[i] = (float)shortArr[i] / CONVERT_FACTOR_SHORT;
-            }
-        }
-        else if (_numChannels == 2)
-        {
-            var input0 = _cresArr[0].PrepareInput(srcSamples);
-            var input1 = _cresArr[1].PrepareInput(srcSamples);
-            for (int i = 0; i < srcSamples; i++)
-            {
-                input0[i] = (float)shortArr[2 * i + 0] / CONVERT_FACTOR_SHORT;
-                input1[i] = (float)shortArr[2 * i + 1] / CONVERT_FACTOR_SHORT;
-            }
-        }
-    }
 
     public long GetOutputSizeInBytes()
     {
         return _outSamplesReady * SHORT_SIZE * _numChannels;
     }
 
-    public unsafe long ConvertAndFillOutput(ref byte[]? outputBuffer)
-    {
-        long outputBytes = GetOutputSizeInBytes();
-        if (outputBuffer is null || outputBuffer.Length < outputBytes)
-        {
-            outputBuffer = new byte[outputBytes];
-        }
-
-        fixed (byte* bytePtr = outputBuffer)
-        {
-            return ConvertAndFillOutput(bytePtr);
-        }
-    }
-
-    public unsafe long ConvertAndFillOutput(byte* outputBuffer)
-    {
-        short* shortPtr = (short*)outputBuffer;
-        if (_numChannels == 1)
-        {
-            float[] floatArr0 = _cresArr[0].Output.Data;
-            for (int i = 0; i < _outSamplesReady; i++)
-            {
-                shortPtr[i] = (short)(floatArr0[i] * CONVERT_FACTOR_SHORT);
-            }
-        }
-        else if (_numChannels == 2)
-        {
-            float[] floatArr0 = _cresArr[0].Output.Data;
-            float[] floatArr1 = _cresArr[1].Output.Data;
-            for (int i = 0; i < _outSamplesReady; i++)
-            {
-                shortPtr[2 * i + 0] = (short)(floatArr0[i] * CONVERT_FACTOR_SHORT);
-                shortPtr[2 * i + 1] = (short)(floatArr1[i] * CONVERT_FACTOR_SHORT);
-            }
-        }
-
-        long result = _outSamplesReady * SHORT_SIZE * _numChannels;
-        _outBytesGenerated += result;
-        return result;
-    }
-
-    public void WriteToStream(Stream stream)
-    {
-        int bytesRead = (int)ConvertAndFillOutput(ref _outBuffer);
-        if (_outBuffer != null)
-        {
-            stream.Write(_outBuffer, 0, bytesRead);
-            _outBytesGenerated += bytesRead;
-        }
-#if DEBUG
-        else
-        {
-            throw new InvalidOperationException("Previous operation did not generate any output.");
-        }
-#endif
-    }
 }
