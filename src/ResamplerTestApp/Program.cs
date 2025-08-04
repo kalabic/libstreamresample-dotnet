@@ -1,6 +1,7 @@
 ﻿using FFmpeg.AutoGen;
 using LibStreamResampler;
 using MFFAmpeg;
+using MFFAmpeg.AVBuffers;
 using MFFAmpeg.AVFormats;
 using MFFAmpeg.Base;
 using System.Diagnostics;
@@ -48,23 +49,22 @@ internal class Program
             MFFApi.OpenAudioReader(inputPath, MFFApi.INPUT_FORMAT_WAV)
             .ThrowIfError();
 
-        var fileFormat = reader.FileFormat;
-        var inputFormat = reader.StreamFormat;
-        ThrowIfUnsupported(fileFormat, inputFormat);
-
         var inputStream = 
             reader.OpenMainStream()
             .ThrowIfError();
+
+        var inputFormat = inputStream.StreamFormat;
+        ThrowIfUnsupported(inputFormat);
 
         Console.WriteLine("Loading input into memory...");
         var packetList =
             MFFApi.CreatePacketList(inputStream);
 
         var outputFormat =
-            new MAudioStreamFormat(outputSampleRate, inputFormat._bits_per_sample, inputFormat._num_channels);
+            new MAudioStreamFormat(AVSampleFormat.AV_SAMPLE_FMT_S16, outputSampleRate, inputFormat.BitsPerSample, inputFormat.NumChannels);
 
         var resampler = StreamResampler.Create(
-            true, inputFormat._num_channels, inputFormat._sample_rate, outputFormat._sample_rate);
+            true, inputFormat.NumChannels, inputFormat.SampleRate, outputFormat.SampleRate);
 
         Console.WriteLine($"Sample ratio factor: {resampler.Factor}");
 
@@ -78,18 +78,18 @@ internal class Program
         }
 
         Console.WriteLine($"Input:");
-        Console.WriteLine($"  Sample format: {fileFormat.CodecName()}");
-        Console.WriteLine($"    Sample rate: {inputFormat._sample_rate}");
-        Console.WriteLine($"Bits per sample: {inputFormat._bits_per_sample}");
-        Console.WriteLine($"       Channels: {inputFormat._num_channels}");
+        Console.WriteLine($"  Sample format: {inputFormat.Format}");
+        Console.WriteLine($"    Sample rate: {inputFormat.SampleRate}");
+        Console.WriteLine($"Bits per sample: {inputFormat.BitsPerSample}");
+        Console.WriteLine($"       Channels: {inputFormat.NumChannels}");
 
         Console.WriteLine($"Output:");
-        Console.WriteLine($"    Sample rate: {outputFormat._sample_rate}");
+        Console.WriteLine($"    Sample rate: {outputFormat.SampleRate}");
 
         Console.WriteLine("Creating output file...");
 
         var writer =
-            MFFApi.OpenAudioWriter(outputPath, MFFApi.DEFAULT_AUDIO_FILE_FORMAT)
+            MFFApi.OpenAudioWriter(outputPath, MFFApi.FILE_FORMAT_WAV)
             .ThrowIfError();
 
         writer.AddStream(outputFormat)
@@ -137,14 +137,14 @@ internal class Program
         Console.WriteLine($"  Output: {byteRateOut}");
     }
 
-    private static void ThrowIfUnsupported(MAudioFileFormat fileFormat, MAudioStreamFormat streamFormat)
+    private static void ThrowIfUnsupported(MAudioStreamFormat streamFormat)
     {
-        if (fileFormat._codec_id != AVCodecID.AV_CODEC_ID_PCM_S16LE)
+        if (streamFormat.Format != AVSampleFormat.AV_SAMPLE_FMT_S16)
         {
             throw new NotImplementedException($"Unsupported sample format.");
         }
 
-        if (streamFormat._num_channels < 1 || streamFormat._num_channels > 2)
+        if (streamFormat.NumChannels < 1 || streamFormat.NumChannels > 2)
         {
             throw new NotImplementedException($"Unsupported channel count.");
         }
