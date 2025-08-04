@@ -4,13 +4,13 @@ MIT License, see: https://github.com/kalabic/libstreamresample-dotnet/blob/maste
 
 History:
 - Original: https://github.com/xycui/libresamplesharp/blob/master/LibResample.Sharp/FloatBuffer.cs
-- Forked: https://github.com/kalabic/libstreamresample-dotnet/blob/master/src/LibStreamResampler/LibResample.Sharp/FloatBuffer.cs
+- Forked: https://github.com/kalabic/libstreamresample-dotnet/blob/master/src/LibStreamResampler/FloatBuffer.cs
 
 */
 
 using System;
 
-namespace LibResample.Sharp
+namespace LibStreamResampler
 {
     internal class FloatBuffer
     {

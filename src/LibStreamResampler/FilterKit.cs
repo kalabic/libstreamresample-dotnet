@@ -4,13 +4,13 @@ MIT License, see: https://github.com/kalabic/libstreamresample-dotnet/blob/maste
 
 History:
 - Original: https://github.com/xycui/libresamplesharp/blob/master/LibResample.Sharp/FilterKit.cs
-- Forked: https://github.com/kalabic/libstreamresample-dotnet/blob/master/src/LibStreamResampler/LibResample.Sharp/FilterKit.cs
+- Forked: https://github.com/kalabic/libstreamresample-dotnet/blob/master/src/LibStreamResampler/FilterKit.cs
 
 */
 
 using System;
 
-namespace LibResample.Sharp
+namespace LibStreamResampler
 {
     /// <summary>
     ///     reference: "Digital Filters, 2nd edition"

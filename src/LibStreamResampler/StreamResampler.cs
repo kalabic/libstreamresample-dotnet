@@ -1,6 +1,4 @@
-﻿using LibResample.Sharp;
-
-namespace LibStreamResampler;
+﻿namespace LibStreamResampler;
 
 /// <summary>
 /// WIP. Works with signed 16bit samples only.
