@@ -40,7 +40,7 @@ public class StreamResampler
     /// </summary>
     private const float CONVERT_FACTOR_SHORT = 32768.0f;
 
-    private unsafe class ChannelResampler : ISampleBuffers
+    private unsafe class ChannelResampler : ReSampler.ISampleBuffers
     {
         private ReSampler _resampler;
 
