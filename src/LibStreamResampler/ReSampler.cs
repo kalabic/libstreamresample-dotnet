@@ -16,21 +16,17 @@ namespace LibStreamResampler
     internal class ReSampler
     {
         /// <summary>
-        /// Callback for producing and consuming samples. Enalbes on-the-fly conversion between sample types
-        /// (signed 16-bit integers to floats, for example) and/or writing directly to an output stream.
+        /// Callback for producing samples. Enalbes on-the-fly conversion between sample types
+        /// (signed 16-bit integers to floats, for example).
         /// </summary>
-        internal interface ISampleBuffers
+        internal interface IInputProducer
         {
             /// <summary>
             /// Get the number of input samples available
             /// </summary>
             /// <returns>number of input samples available</returns>
             int GetInputBufferLenght();
-            /// <summary>
-            /// Get the number of samples the output buffer has room for
-            /// </summary>
-            /// <returns>number of samples the output buffer has room for</returns>
-            int GetOutputBufferLength();
+
             /// <summary>
             /// Copy lenght samples from the input buffer to the given array, starting at the 
             /// given offset. Samples should be in the range -1.0f to 1.0f
@@ -39,6 +35,20 @@ namespace LibStreamResampler
             /// <param name="offset">start writing samples here</param>
             /// <param name="length">write this many samples</param>
             void ProduceInput(float[] array, int offset, int length);
+        }
+
+        /// <summary>
+        /// Callback for consuming samples. Enalbes on-the-fly conversion between sample types
+        /// (signed 16-bit integers to floats, for example) and/or writing directly to an output stream.
+        /// </summary>
+        internal interface IOutputConsumer
+        {
+            /// <summary>
+            /// Get the number of samples the output buffer has room for
+            /// </summary>
+            /// <returns>number of samples the output buffer has room for</returns>
+            int GetOutputBufferLength();
+
             /// <summary>
             /// Copy length samples from the given array to the output buffer, starting at the given offset.
             /// </summary>
@@ -50,9 +60,113 @@ namespace LibStreamResampler
 
 
         /// <summary>
+        ///     Wrapper for cached arrays of coefficients.
+        /// </summary>
+        internal class Coefficients
+        {
+            private static readonly Object s_lock = new();
+
+            private static Coefficients? s_nmult_HQ = null;
+
+            private static Coefficients? s_nmult_LQ = null;
+
+            internal static int calc_nwing(int nmult)
+            {
+                return Npc * (nmult - 1) / 2;
+            }
+
+            private static Coefficients GetCoefficients(int nmult)
+            {
+                if (nmult == NMULT_HQ)
+                {
+                    if (s_nmult_HQ is null)
+                    {
+                        int nwing = Coefficients.calc_nwing(nmult);
+                        s_nmult_HQ = new Coefficients(nwing, 0.5 * ROLL_OFF, BETA, Npc);
+                    }
+                    return s_nmult_HQ;
+                }
+                else if (nmult == NMULT_LQ)
+                {
+                    if (s_nmult_LQ is null)
+                    {
+                        int nwing = Coefficients.calc_nwing(nmult);
+                        s_nmult_LQ = new Coefficients(nwing, 0.5 * ROLL_OFF, BETA, Npc);
+                    }
+                    return s_nmult_LQ;
+                }
+                else
+                {
+                    throw new NotImplementedException($"Don't have coefficients for nmult={nmult}");
+                }
+            }
+
+            internal static float[] GetCoArray_imp64(int nmult)
+            {
+                lock (s_lock)
+                {
+                    return GetCoefficients(nmult).imp64;
+                }
+            }
+
+            internal static float[] GetCoArray_impD64(int nmult)
+            {
+                lock (s_lock)
+                {
+                    return GetCoefficients(nmult).impD64;
+                }
+            }
+
+            public readonly float[] imp64;
+
+            public readonly float[] impD64;
+
+            internal Coefficients(int nwing, double frq, double beta, int num)
+            {
+                double[] dbl_imp64 = new double[nwing];
+                FilterKit.LrsLpFilter(dbl_imp64, nwing, frq, beta, num);
+
+                imp64 = new float[nwing];
+                for (var i = 0; i < nwing; i++)
+                {
+                    imp64[i] = (float)dbl_imp64[i];
+                }
+
+                impD64 = new float[nwing];
+                for (var i = 0; i < nwing - 1; i++)
+                {
+                    impD64[i] = imp64[i + 1] - imp64[i];
+                }
+                impD64[nwing - 1] = -imp64[nwing - 1];
+            }
+        }
+
+
+        /// <summary>
         ///     Number of values per 1/delta in impulse response
         /// </summary>
         internal const int Npc = 4096;
+
+        /// <summary>
+        ///     Roll-off frequency of filter
+        /// </summary>
+        internal const double ROLL_OFF = 0.90;
+
+        /// <summary>
+        ///     Kaiser window parameter beta.
+        /// </summary>
+        internal const double BETA = 6;
+
+        /// <summary>
+        ///     Multiplier that determines the length of the HIGH quality filter.
+        /// </summary>
+        internal const int NMULT_HQ = 35;
+
+        /// <summary>
+        ///     Multiplier that determines the length of the LOW quality filter.
+        /// </summary>
+        internal const int NMULT_LQ = 11;
+
 
         private readonly float[] _imp;
         private readonly float[] _impD;
@@ -106,30 +220,13 @@ namespace LibStreamResampler
 
             _minFactor = minFactor;
             _maxFactor = maxFactor;
-            _nmult = highQuality ? 35 : 11;
+            _nmult = highQuality ? NMULT_HQ : NMULT_LQ;
             _lpScl = 1.0f;
-            _nwing = Npc * (_nmult - 1) / 2; // # of filter coeffs in right wing
+            _nwing = Coefficients.calc_nwing(_nmult); // # of filter coeffs in right wing
 
-            const double rolloff = 0.90;
-            const double beta = 6;
-
-            var imp64 = new double[_nwing];
-
-            FilterKit.LrsLpFilter(imp64, _nwing, 0.5 * rolloff, beta, Npc);
-            _imp = new float[_nwing];
-            _impD = new float[_nwing];
-
-            for (var i = 0; i < _nwing; i++)
-            {
-                _imp[i] = (float)imp64[i];
-            }
-
-            for (var i = 0; i < _nwing-1; i++)
-            {
-                _impD[i] = _imp[i + 1] - _imp[i];
-            }
-
-            _impD[_nwing - 1] = -_imp[_nwing - 1];
+            // Use cached arrays of coefficients, allocated and calculated only on first use.
+            _imp = Coefficients.GetCoArray_imp64(_nmult);
+            _impD = Coefficients.GetCoArray_impD64(_nmult);
 
             var xoffMin = (int)(((_nmult + 1) / 2.0) * Math.Max(1.0, 1.0 / minFactor) + 10);
             var xoffMax = (int)(((_nmult + 1) / 2.0) * Math.Max(1.0, 1.0 / maxFactor) + 10);
@@ -152,15 +249,15 @@ namespace LibStreamResampler
             return _xoff;
         }
 
-        internal bool Process(double factor, ISampleBuffers buffers, bool lastBatch)
+        internal bool Process(double factor, IInputProducer input, IOutputConsumer output, bool lastBatch)
         {
             if (factor < _minFactor || factor > _maxFactor)
             {
                 throw new ArgumentException("factor" + factor + "is not between minFactor=" + _minFactor + " and maxFactor=" + _maxFactor);
             }
 
-            int outBufferLen = buffers.GetOutputBufferLength();
-            int inBufferLen = buffers.GetInputBufferLenght();
+            int outBufferLen = output.GetOutputBufferLength();
+            int inBufferLen = input.GetInputBufferLenght();
 
             float[] imp = _imp;
             float[] impD = _impD;
@@ -175,7 +272,7 @@ namespace LibStreamResampler
             {
                 int len = Math.Min(outBufferLen - outSampleCount, _yp);
 
-                buffers.ConsumeOutput(_y, 0, len);
+                output.ConsumeOutput(_y, 0, len);
 
                 outSampleCount += len;
                 for (int i = 0; i < _yp - len; i++)
@@ -204,7 +301,7 @@ namespace LibStreamResampler
                     len = inBufferLen - inBufferUsed;
                 }
 
-                buffers.ProduceInput(_x, _xread, len);
+                input.ProduceInput(_x, _xread, len);
 
                 inBufferUsed += len;
                 _xread += len;
@@ -266,7 +363,7 @@ namespace LibStreamResampler
                 {
                     len = Math.Min(outBufferLen - outSampleCount, _yp);
 
-                    buffers.ConsumeOutput(_y, 0, len);
+                    output.ConsumeOutput(_y, 0, len);
                     outSampleCount += len;
                     for (int i = 0; i < _yp - len; i++)
                     {
@@ -356,18 +453,6 @@ namespace LibStreamResampler
 
             _time = currentTime;
             return ypIndex;
-        }
-
-        public class Result
-        {
-            public Result(int inputSamplesconsumed, int outputSamplesGenerated)
-            {
-                InputSamplesConsumed = inputSamplesconsumed;
-                OutputSamplesgenerated = outputSamplesGenerated;
-            }
-
-            public int InputSamplesConsumed { get; private set; }
-            public int OutputSamplesgenerated { get; private set; }
         }
     }
 }

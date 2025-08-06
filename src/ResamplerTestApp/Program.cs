@@ -63,8 +63,8 @@ internal class Program
         var outputFormat =
             new MAudioStreamFormat(AVSampleFormat.AV_SAMPLE_FMT_S16, outputSampleRate, inputFormat.BitsPerSample, inputFormat.NumChannels);
 
-        var resampler = StreamResampler.Create(
-            false, inputFormat.NumChannels, inputFormat.SampleRate, outputFormat.SampleRate);
+        var resampler = StreamResampler.NewBytePacketResampler(
+            false, 0.0f, inputFormat.SampleRate, outputFormat.SampleRate, inputFormat.NumChannels);
 
         Console.WriteLine($"Sample ratio factor: {resampler.Factor}");
 
@@ -72,7 +72,7 @@ internal class Program
         var outputData = new List<MByteBuffer>(packetList.Count);
         foreach (var packet in packetList)
         {
-            int outputSize = StreamResampler.GetExpectedOutputSize(packet.Size, resampler.Factor);
+            long outputSize = StreamResampler.GetExpectedOutputSize(packet.Size, resampler.Factor);
             outputData.Add( MFFApi.AllocPacketBuffer((ulong)outputSize) );
         }
 
@@ -108,9 +108,8 @@ internal class Program
             var buffer = outputData[i];
             unsafe
             {
-                // Number and size of output buffers was prepared during pre-allocation.
-                buffer.BytesUsed = (ulong)resampler.Process(packet.Data, packet.Size, packet.LastPacket, buffer.Data, (long)buffer.BytesAllocated);
-                // buffer.BytesUsed = (ulong)resampler.ConvertAndFillOutput(buffer.Data);
+                // Output buffers were made fit for input during pre-allocation.
+                buffer.BytesUsed = (ulong)resampler.Process(packet.LastPacket, packet.Data, packet.Size, buffer.Data, (long)buffer.BytesAllocated);
             }
 
             if (i % 500 == 0)
@@ -145,6 +144,7 @@ internal class Program
         }
         packetList.Clear();
 
+        resampler.Dispose();
         writer.Dispose();
         reader.Dispose();
 

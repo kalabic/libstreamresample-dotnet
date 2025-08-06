@@ -1,37 +1,302 @@
-﻿namespace LibStreamResampler;
+﻿/*
+
+MIT License, see: https://github.com/kalabic/libstreamresample-dotnet/blob/master/LICENSE
+
+History:
+- Original: https://github.com/kalabic/libstreamresample-dotnet/blob/master/src/LibStreamResampler/StreamResampler.cs
+
+*/
+
+namespace LibStreamResampler;
+
 
 /// <summary>
-/// WIP. Works with signed 16bit samples only.
+/// Use one of following static members to create an instance of resampler:
+/// <list type="bullet">
+///     <item> To work with byte type inputs and outputs: <see cref="StreamResampler.NewBytePacketResampler"/> </item>
+///     <item> To work with short (signed 16-bit) type inputs and outputs: <see cref="StreamResampler.NewShortPacketResampler"/> </item>
+///     <item> To work with float type inputs and outputs: <see cref="StreamResampler.NewFloatPacketResampler"/> </item>
+/// </list>
+/// 
+/// Parameters:
+/// <list type="bullet">
+///     <item>highQuality - If false it will use lower quality algorithm, but faster.</item>
+///     <item>factor - Ratio between input and output sample rate. If it is zero then both input and output sample rate parameters must be provided.</item>
+///     <item>inputSampleRate - Can be zero if parameter 'factor' is non-zero value.</item>
+///     <item>outputSampleRate - Can be zero if parameter 'factor' is non-zero value.</item>
+///     <item>numChannels - Number of audio channels in input stream. Supported values aree 1 and 2.</item>
+///     <item>sampleFormat - Input sample format. Supported value is <see cref="StreamResampler.SAMPLE_FMT_S16"/>, signed 16-bit integer.</item>
+///     <item>outSampleFormat - Default is 0, the same as input sample format.</item>
+///     <item>outChannels - Default is 0, the same as number of channels at input.</item>
+/// </list>
+/// FYI: Some of input/output conversions are still work in progress.
 /// </summary>
-public class StreamResampler
+public class StreamResampler 
+    : StreamResampler.IBytePacketResampler
+    , StreamResampler.IShortPacketResampler
+    , StreamResampler.IFloatPacketResampler
 {
-    public static StreamResampler Create(bool highQuality, int numChannels, int inputSampleRate, int outputSampleRate)
+    public const int SAMPLE_FMT_NONE = 0; // Defaults to input sample format.
+    public const int SAMPLE_FMT_S16 = 1; // Signed 16 bit sample format.
+
+
+    public interface IStreamResamplerInfo
     {
-        return new StreamResampler(highQuality, numChannels, inputSampleRate, outputSampleRate);
+        bool HighQuality { get; }
+
+        float Factor { get; }
+
+        int InputSampleRate { get; }
+
+        int OutputSampleRate { get; }
+
+        int NumChannels { get; }
+
+        int SampleFormat { get; }
+
+        int OutputSampleFormat { get; }
+
+        int OutputChannels { get; }
+
+        long InPacketCount { get; }
+
+        long InBytesProcessed { get; }
+
+        long OutBytesGenerated { get; }
     }
 
-    public static int GetExpectedOutputSize(int inputSize, float factor)
-    {
-        return (int)(inputSize * factor) + 400;
-    }
-
-    public static unsafe short[] ShortArrayFromBytes(byte* src, int srcSize)
-    {
-        int srcSamples = srcSize / SHORT_SIZE;
-        short* shortArr = (short *)src;
-        short[] resultArr = new short[srcSamples];
-        fixed (short* resultPtr = resultArr)
-        {
-            Buffer.MemoryCopy(shortArr, resultPtr, srcSize, srcSize);
-        }
-        return resultArr;
-    }
 
     /// <summary>
-    /// Yes, sizeof(short) exists, but this is here as a reminder that current implementation works with
-    /// signed 16bit samples only. It is work in progress.
+    /// 
+    /// Interface used to work with byte type inputs and outputs.
+    /// 
     /// </summary>
-    private const int SHORT_SIZE = 2;
+    public interface IBytePacketResampler : IStreamResamplerInfo, IDisposable
+    {
+        unsafe long Process(bool lastPacket, byte* input, long inputSize, byte* output, long outputSize);
+
+        long Process(bool lastPacket, byte[] input, long inputSize, byte[] output, long outputSize);
+
+        long ProcessToShort(bool lastPacket, byte[] input, long inputSize, ref short[]? output);
+    }
+
+
+    /// <summary>
+    /// 
+    /// Create instance of resampler and return its <see cref="IBytePacketResampler"/> interface.
+    /// 
+    /// <para>See summary for <see cref="StreamResampler"/> class for description of parameters.</para>
+    /// </summary>
+    public static IBytePacketResampler NewBytePacketResampler(bool highQuality,
+                                                              float factor,
+                                                              int inputSampleRate = 0,
+                                                              int outputSampleRate = 0,
+                                                              int numChannels = 1, 
+                                                              int sampleFormat = SAMPLE_FMT_S16,
+                                                              int outSampleFormat = SAMPLE_FMT_NONE,
+                                                              int outChannels = 0)
+    {
+        return new StreamResampler(highQuality, factor, inputSampleRate, outputSampleRate, numChannels, sampleFormat, outSampleFormat, outChannels);
+    }
+
+
+    /// <summary>
+    /// 
+    /// Interface used to work with short type inputs and outputs.
+    /// 
+    /// </summary>
+    public interface IShortPacketResampler : IStreamResamplerInfo, IDisposable
+    {
+        unsafe long Process(bool lastPacket, short* input, long inputSize, short* output, long outputSize);
+
+        long Process(bool lastPacket, short[] input, long inputSize, short[] output, long outputSize);
+
+        long ProcessToByte(bool lastPacket, short[] input, long inputSize, ref byte[]? output);
+    }
+
+
+    /// <summary>
+    /// 
+    /// Create instance of resampler and return its <see cref="IShortPacketResampler"/> interface.
+    /// 
+    /// <para>See summary for <see cref="StreamResampler"/> class for description of parameters.</para>
+    /// </summary>
+    public static IShortPacketResampler NewShortPacketResampler(bool highQuality,
+                                                                float factor,
+                                                                int inputSampleRate = 0,
+                                                                int outputSampleRate = 0,
+                                                                int numChannels = 1,
+                                                                int sampleFormat = SAMPLE_FMT_S16,
+                                                                int outSampleFormat = SAMPLE_FMT_NONE,
+                                                                int outChannels = 0)
+    {
+        return new StreamResampler(highQuality, factor, inputSampleRate, outputSampleRate, numChannels, sampleFormat, outSampleFormat, outChannels);
+    }
+
+
+    /// <summary>
+    /// 
+    /// Interface used to work with float type inputs and outputs.
+    /// 
+    /// </summary>
+    public interface IFloatPacketResampler : IStreamResamplerInfo, IDisposable
+    {
+        unsafe long Process(bool lastPacket, float* input, long inputSize, float* output, long outputSize);
+
+        long Process(bool lastPacket, float[] input, long inputSize, float[] output, long outputSize);
+    }
+
+
+    /// <summary>
+    /// 
+    /// Create instance of resampler and return its <see cref="IFloatPacketResampler"/> interface.
+    /// 
+    /// <para>See summary for <see cref="StreamResampler"/> class for description of parameters.</para>
+    /// </summary>
+    public static IFloatPacketResampler NewFloatPacketResampler(bool highQuality,
+                                                                float factor,
+                                                                int inputSampleRate = 0,
+                                                                int outputSampleRate = 0,
+                                                                int numChannels = 1,
+                                                                int sampleFormat = SAMPLE_FMT_S16,
+                                                                int outSampleFormat = SAMPLE_FMT_NONE,
+                                                                int outChannels = 0)
+    {
+        return new StreamResampler(highQuality, factor, inputSampleRate, outputSampleRate, numChannels, sampleFormat, outSampleFormat, outChannels);
+    }
+
+
+    /// <summary>
+    /// 
+    /// As per function name, calculate expected output size for given input size and resampling factor.
+    /// 
+    /// </summary>
+    /// <param name="inputSize"></param>
+    /// <param name="factor"></param>
+    /// <returns></returns>
+    public static long GetExpectedOutputSize(long inputSize, float factor)
+    {
+        return (long)((double)inputSize * factor) + 400;
+    }
+
+
+    /// <summary>
+    /// 
+    /// This is used for validation of some of parameters used to create a resampler. Values that need to be provided are:
+    /// 
+    /// <list type="bullet">
+    ///     <item>only <paramref name="factor"/></item>
+    ///     <item>only <paramref name="inputSampleRate"/> and <paramref name="outputSampleRate"/></item>
+    ///     <item>or <paramref name="factor"/> and only one of sample rates</item>
+    /// </list>
+    /// </summary>
+    /// <param name="factor"></param>
+    /// <param name="inputSampleRate"></param>
+    /// <param name="outputSampleRate"></param>
+    /// <returns>Calculated and validated value for <paramref name="factor"/>.</returns>
+    /// <exception cref="ArgumentException"></exception>
+    public static float CalcFactor(float factor = 0.0f, int inputSampleRate = 0, int outputSampleRate = 0)
+    {
+        if (factor > 0.0f && inputSampleRate > 0 && outputSampleRate > 0)
+        {
+            throw new ArgumentException("Provide only factor, only input and output sample rates, or only factor and one of sample rates.");
+        }
+
+        if (factor <= 0.0f)
+        {
+            if (inputSampleRate == 0 || outputSampleRate == 0)
+            {
+                throw new ArgumentException("If factor is unspecified, both input and output sample rates must be provided.");
+            }
+
+            factor = (float)outputSampleRate / (float)inputSampleRate;
+        }
+
+        return factor;
+    }
+
+
+    /// <summary>
+    /// 
+    /// This is used for validation of some of parameters used to create a resampler. Values that need to be provided are:
+    /// 
+    /// <list type="bullet">
+    ///     <item>only <paramref name="factor"/></item>
+    ///     <item>only <paramref name="inputSampleRate"/> and <paramref name="outputSampleRate"/></item>
+    ///     <item>or <paramref name="factor"/> and only one of sample rates</item>
+    /// </list>
+    /// </summary>
+    /// <param name="factor"></param>
+    /// <param name="inputSampleRate"></param>
+    /// <param name="outputSampleRate"></param>
+    /// <returns>Calculated and validated value for <paramref name="inputSampleRate"/>.</returns>
+    /// <exception cref="ArgumentException"></exception>
+    public static int CalcInputSampleRate(float factor, int inputSampleRate, int outputSampleRate)
+    {
+        if (factor > 0.0f && inputSampleRate > 0 && outputSampleRate > 0)
+        {
+            throw new ArgumentException("Provide only factor, only input and output sample rates, or only factor and one of sample rates.");
+        }
+
+        if (inputSampleRate <= 0)
+        {
+            if (factor <= 0.0f || outputSampleRate <= 0)
+            {
+                throw new ArgumentException("If input sample rate is unspecified, factor or both factor and output sample rate must be provided.");
+            }
+
+            inputSampleRate = (int)((float)outputSampleRate / factor);
+        }
+
+        return inputSampleRate;
+    }
+
+
+    /// <summary>
+    /// 
+    /// This is used for validation of some of parameters used to create a resampler. Values that need to be provided are:
+    /// 
+    /// <list type="bullet">
+    ///     <item>only <paramref name="factor"/></item>
+    ///     <item>only <paramref name="inputSampleRate"/> and <paramref name="outputSampleRate"/></item>
+    ///     <item>or <paramref name="factor"/> and only one of sample rates</item>
+    /// </list>
+    /// </summary>
+    /// <param name="factor"></param>
+    /// <param name="inputSampleRate"></param>
+    /// <param name="outputSampleRate"></param>
+    /// <returns>Calculated and validated value for <paramref name="outputSampleRate"/>.</returns>
+    /// <exception cref="ArgumentException"></exception>
+    public static int CalcOutputSampleRate(float factor, int inputSampleRate, int outputSampleRate)
+    {
+        if (factor > 0.0f && inputSampleRate > 0 && outputSampleRate > 0)
+        {
+            throw new ArgumentException("Provide only factor, only input and output sample rates, or only factor and one of sample rates.");
+        }
+
+        if (outputSampleRate <= 0)
+        {
+            if (factor <= 0.0f || inputSampleRate <= 0)
+            {
+                throw new ArgumentException("If output sample rate is unspecified, factor or both factor and input sample rate must be provided.");
+            }
+
+            outputSampleRate = (int)((float)inputSampleRate * factor);
+        }
+
+        return outputSampleRate;
+    }
+
+    private static unsafe byte* ShortArrToPtrUnsafe(short[] arr)
+    {
+        fixed (short* ptr = arr) { return (byte*)ptr; }
+    }
+
+    private static unsafe byte* ByteArrToPtrUnsafe(byte[] arr)
+    {
+        fixed (byte* ptr = arr) { return ptr; }
+    }
+
 
     /// <summary>
     /// Value used by Apple (Core Audio)1, ALSA2, MatLab2, sndlib2.
@@ -40,7 +305,15 @@ public class StreamResampler
     /// </summary>
     private const float CONVERT_FACTOR_SHORT = 32768.0f;
 
-    private unsafe class ChannelResampler : ReSampler.ISampleBuffers
+
+    /// <summary>
+    /// Every audio channel has its own indenpendent resampler. It is a wrapper around instance of <see cref="ReSampler"/> and
+    /// provides it with an interface for on-the-fly conversion.
+    /// </summary>
+    private unsafe class ChannelResampler 
+        : ReSampler.IInputProducer
+        , ReSampler.IOutputConsumer
+        , IDisposable
     {
         private ReSampler _resampler;
 
@@ -60,45 +333,44 @@ public class StreamResampler
 
         private long _outputSampleCount = 0;
 
-        public ChannelResampler(bool highQuality, float factor, int ioff, int istep)
+        internal ChannelResampler(bool highQuality, float factor, int ioff, int istep)
         {
             _resampler = new(highQuality, factor, factor);
             _ioff = ioff;
             _istep = istep;
         }
 
-        public unsafe long ProcessInput(float factor, bool lastPacket, byte* input, long inputSize, byte* output, long outputSize)
+        internal unsafe long ProcessInput(float factor, bool lastPacket, byte* input, long inputSize, byte* output, long outputSize)
         {
             _input = (short *)input;
-            _output = (short*)output;
+            _output = (short *)output;
             _inputSamplesUsed = 0;
-            _inputSampleCount = inputSize / 2;
+            _inputSampleCount = inputSize / sizeof(short);
             _outputSampleCount = 0;
-            _outputSampleMaxCount = outputSize / 2;
+            _outputSampleMaxCount = outputSize / sizeof(short);
 
-            _resampler.Process(factor, this, lastPacket);
+            _resampler.Process(factor, this, this, lastPacket);
             if (_inputSamplesUsed < _inputSampleCount)
             {
                 throw new InvalidOperationException("Previous operation did not process all of input.");
             }
 
-            return _outputSampleCount * 2;
+            return _outputSampleCount * sizeof(short);
         }
 
-        //
-        // ISampleBuffers interface members.
-        //
-
+        /// <summary> See summary for <see cref="ReSampler.IInputProducer.GetInputBufferLenght"/> </summary>
         public int GetInputBufferLenght()
         {
             return (int)(_inputSampleCount - _inputSamplesUsed);
         }
 
+        /// <summary> See summary for <see cref="ReSampler.IOutputConsumer.GetOutputBufferLength"/> </summary>
         public int GetOutputBufferLength()
         {
             return (int)(_outputSampleMaxCount - _outputSampleCount);
         }
 
+        /// <summary> See summary for <see cref="ReSampler.IInputProducer.ProduceInput"/> </summary>
         public void ProduceInput(float[] array, int offset, int length)
         {
             for (int i = 0; i < length; i++)
@@ -109,6 +381,7 @@ public class StreamResampler
             _inputSamplesUsed += length;
         }
 
+        /// <summary> See summary for <see cref="ReSampler.IOutputConsumer.ConsumeOutput"/> </summary>
         public void ConsumeOutput(float[] array, int offset, int length)
         {
             for (int i = 0; i < length; i++)
@@ -118,9 +391,27 @@ public class StreamResampler
             }
             _outputSampleCount += length;
         }
+
+        public void Dispose()
+        {
+        }
     }
 
+    public bool HighQuality { get { return _highQuality; } }
+
     public float Factor { get { return _factor; } }
+
+    public int InputSampleRate { get { return _inputSampleRate; } }
+
+    public int OutputSampleRate { get { return _outputSampleRate; } }
+
+    public int NumChannels { get { return _numChannels; } }
+
+    public int SampleFormat { get { return _sampleFormat; } }
+
+    public int OutputSampleFormat { get { return _outSampleFormat; } }
+
+    public int OutputChannels { get { return _outChannels; } }
 
     public long InPacketCount { get { return _inPacketCount; } }
 
@@ -128,11 +419,23 @@ public class StreamResampler
 
     public long OutBytesGenerated { get { return _outBytesGenerated; } }
 
-    private int _numChannels;
+    private bool _highQuality;
 
     private float _factor;
 
-    private ChannelResampler[] _cresArr;
+    private int _inputSampleRate;
+
+    private int _outputSampleRate;
+
+    private int _numChannels;
+
+    private int _sampleFormat;
+
+    private int _outSampleFormat;
+
+    private int _outChannels;
+
+    private ChannelResampler[] _chrs;
 
     private long _outSamplesReady = 0;
 
@@ -142,50 +445,127 @@ public class StreamResampler
 
     private long _outBytesGenerated = 0;
 
-    private StreamResampler(bool highQuality, int numChannels, int inputSampleRate, int outputSampleRate)
-        : this(highQuality, numChannels, (float)outputSampleRate / (float)inputSampleRate)
-    { }
-
-    private StreamResampler(bool highQuality, int numChannels, float factor)
+    private StreamResampler(bool highQuality,
+                            float factor,
+                            int inputSampleRate = 0,
+                            int outputSampleRate = 0,
+                            int numChannels = 1,
+                            int sampleFormat = SAMPLE_FMT_S16,
+                            int outSampleFormat = SAMPLE_FMT_NONE,
+                            int outChannels = 0)
     {
-        if (numChannels < 1 || numChannels > 2)
+        if (numChannels < 1 || numChannels > 2 || outChannels < 0 || outChannels > 2)
         {
-            throw new ArgumentOutOfRangeException("Unsupported number of channels.");
+            throw new ArgumentException("Unsupported number of channels.");
         }
 
+        if (sampleFormat != SAMPLE_FMT_S16)
+        {
+            throw new ArgumentException("Unsupported sample format.");
+        }
+
+        _highQuality = highQuality;
+        _factor = CalcFactor(factor, inputSampleRate, outputSampleRate);
+        _inputSampleRate = CalcInputSampleRate(factor, inputSampleRate, outputSampleRate);
+        _outputSampleRate = CalcOutputSampleRate(factor, inputSampleRate, outputSampleRate);
         _numChannels = numChannels;
-        _factor = factor;
-        _cresArr = new ChannelResampler[numChannels];
+        _sampleFormat = sampleFormat;
+        _outSampleFormat = outSampleFormat;
+        _outChannels = outChannels;
+
+        _chrs = new ChannelResampler[numChannels];
         if (numChannels == 1)
         {
-            _cresArr[0] = new ChannelResampler(highQuality, factor, 0, 1);
+            _chrs[0] = new ChannelResampler(_highQuality, _factor, 0, 1);
         }
         else if (numChannels == 2)
         {
-            _cresArr[0] = new ChannelResampler(highQuality, factor, 0, 2);
-            _cresArr[1] = new ChannelResampler(highQuality, factor, 1, 2);
+            _chrs[0] = new ChannelResampler(_highQuality, _factor, 0, 2);
+            _chrs[1] = new ChannelResampler(_highQuality, _factor, 1, 2);
         }
     }
 
-    public unsafe long Process(byte* input, long inputSize, bool lastPacket, byte* output, long outputSize)
+    public void Dispose()
+    {
+        for (int i = 0; i < _numChannels; i++)
+        {
+            _chrs[i].Dispose();
+        }
+        _numChannels = 0;
+    }
+
+    public unsafe long Process(bool lastPacket, byte* input, long inputSize, byte* output, long outputSize)
     {
         long outputUsed = 0;
         for (int i=0; i < _numChannels; i++)
         {
             // TODO(?): Assert that all channels returned the same value.
-            // TODO(?): Process in parallel (async).
-            outputUsed += _cresArr[i].ProcessInput(_factor, lastPacket, input, inputSize / _numChannels, output, outputSize / _numChannels);
+            outputUsed += _chrs[i].ProcessInput(_factor, lastPacket, input, inputSize / _numChannels, output, outputSize / _numChannels);
         }
 
         _inPacketCount++;
         _inBytesProcessed += inputSize;
+        _outBytesGenerated += outputSize;
         return outputUsed;
     }
 
-
-    public long GetOutputSizeInBytes()
+    public long Process(bool lastPacket, byte[] input, long inputSize, byte[] output, long outputSize)
     {
-        return _outSamplesReady * SHORT_SIZE * _numChannels;
+        unsafe
+        {
+            fixed (byte* inputPtr = input, outputPtr = output)
+            {
+                return Process(lastPacket, inputPtr, inputSize, outputPtr, outputSize);
+            }
+        }
     }
 
+    public long ProcessToShort(bool lastPacket, byte[] input, long inputSize, ref short[]? output)
+    {
+        long outputSize = GetExpectedOutputSize(inputSize, _factor) / sizeof(short);
+        if (output is null || output.Length < outputSize)
+        {
+            output = new short[outputSize];
+        }
+
+        unsafe
+        {
+            return Process(lastPacket, ByteArrToPtrUnsafe(input), inputSize, ShortArrToPtrUnsafe(output), outputSize * sizeof(short)) / sizeof(short);
+        }
+    }
+
+    public unsafe long Process(bool lastPacket, short* input, long inputSize, short* output, long outputSize)
+    {
+        throw new NotImplementedException();
+    }
+
+    public long Process(bool lastPacket, short[] input, long inputSize, short[] output, long outputSize)
+    {
+        throw new NotImplementedException();
+    }
+
+    public long ProcessToByte(bool lastPacket, short[] input, long inputSize, ref byte[]? output)
+    {
+        long inByteSize = inputSize * sizeof(short);
+        long outputSize = GetExpectedOutputSize(inByteSize, _factor);
+        if (output is null || output.Length < outputSize)
+        {
+            output = new byte[outputSize];
+        }
+
+        unsafe
+        {
+            return Process(lastPacket, ShortArrToPtrUnsafe(input), inByteSize, ByteArrToPtrUnsafe(output), outputSize);
+        }
+    }
+
+    public unsafe long Process(bool lastPacket, float* input, long inputSize, float* output, long outputSize)
+    {
+        throw new NotImplementedException();
+    }
+
+    public long Process(bool lastPacket, float[] input, long inputSize, float[] output, long outputSize)
+    {
+        throw new NotImplementedException();
+    }
 }
